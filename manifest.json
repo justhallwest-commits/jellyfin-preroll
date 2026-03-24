@@ -4,7 +4,7 @@
     "name": "Pre-Roll Videos",
     "description": "Plays videos from a selected library before TV episodes or movies — perfect for studio logos, custom commercials, or broadcast intros.",
     "overview": "Choose any Jellyfin library as your pre-roll source. Videos from that library will automatically play before TV episodes and/or movies. Supports random order, multiple clips per play, and per-content-type toggles.",
-    "owner": "your-github-username",
+    "owner": "justhallwest-commits",
     "category": "General",
     "imageUrl": "",
     "versions": []
