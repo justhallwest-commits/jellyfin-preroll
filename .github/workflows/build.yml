@@ -56,13 +56,13 @@ jobs:
           MD5=$(md5sum "${{ steps.vars.outputs.zip }}" | awk '{print $1}')
           echo "md5=$MD5" >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub Release and upload zip
+   - name: Create GitHub Release and upload zip
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.vars.outputs.tag }}
           name: "Pre-Roll Videos ${{ steps.vars.outputs.tag }}"
-          body: |
-            ## Pre-Roll Videos ${{ steps.vars.outputs.tag }}
+          body: "Install via Jellyfin > Plugins > Repositories and add: https://raw.githubusercontent.com/${{ github.repository }}/main/manifest.json"
+          files: ${{ steps.vars.outputs.zip }}
 
             Add this URL to Jellyfin → Plugins → Repositories:
 ```
