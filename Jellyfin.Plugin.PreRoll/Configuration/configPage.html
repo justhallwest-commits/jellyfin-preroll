@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>Pre-Roll Videos</title>
+</head>
+<body>
+<div data-role="page" class="page type-interior pluginConfigurationPage prerollConfigPage"
+     data-require="emby-input,emby-button,emby-select,emby-checkbox">
+    <div data-role="content">
+        <div class="content-primary">
+
+            <form id="PreRollConfigForm">
+
+                <!-- ── Header ───────────────────────────────────────────── -->
+                <div class="verticalSection">
+                    <div class="sectionTitleContainer flex align-items-center">
+                        <h2 class="sectionTitle">🎬 Pre-Roll Videos</h2>
+                    </div>
+                    <p class="sectionLabelSeparator">
+                        Pick a library whose videos will play before your TV episodes or movies —
+                        great for studio logos, network idents, or custom commercials.
+                    </p>
+                </div>
+
+                <!-- ── Library picker ────────────────────────────────────── -->
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="selectLibrary">
+                        Pre-Roll Source Library
+                    </label>
+                    <select id="selectLibrary"
+                            is="emby-select"
+                            data-role="none"
+                            class="emby-select-withcolor emby-select">
+                        <option value="">— Loading libraries… —</option>
+                    </select>
+                    <div class="fieldDescription">
+                        All video files inside this library will be eligible as pre-rolls.
+                        The library can be any type (Movies, Mixed Content, etc.).
+                    </div>
+                </div>
+
+                <!-- ── Content-type toggles ───────────────────────────────── -->
+                <div class="verticalSection">
+                    <h3 class="sectionTitle">Play Before…</h3>
+
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="chkTvShows" type="checkbox" is="emby-checkbox" />
+                            <span>TV Show Episodes</span>
+                        </label>
+                    </div>
+
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="chkMovies" type="checkbox" is="emby-checkbox" />
+                            <span>Movies</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- ── Playback options ───────────────────────────────────── -->
+                <div class="verticalSection">
+                    <h3 class="sectionTitle">Playback Options</h3>
+
+                    <div class="checkboxContainer">
+                        <label class="emby-checkbox-label">
+                            <input id="chkRandom" type="checkbox" is="emby-checkbox" />
+                            <span>Random order</span>
+                        </label>
+                        <div class="fieldDescription">
+                            Pick a random clip each time instead of playing in library order.
+                        </div>
+                    </div>
+
+                    <div class="inputContainer" style="max-width:200px; margin-top:1em;">
+                        <label class="inputLabel inputLabelUnfocused" for="txtMaxPreRolls">
+                            Clips per play (1–10)
+                        </label>
+                        <input id="txtMaxPreRolls"
+                               type="number"
+                               is="emby-input"
+                               min="1" max="10" step="1" />
+                        <div class="fieldDescription">
+                            How many pre-roll clips to queue before the main title.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Save ───────────────────────────────────────────────── -->
+                <div class="verticalSection">
+                    <button is="emby-button"
+                            type="submit"
+                            class="raised button-submit block emby-button">
+                        <span>💾 Save Settings</span>
+                    </button>
+                </div>
+
+            </form>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+    (function () {
+        'use strict';
+
+        var PLUGIN_ID = 'a4b2c3d4-e5f6-7890-abcd-ef1234567891';
+
+        /* ── Helpers ──────────────────────────────────────────────────── */
+
+        function el(id) { return document.getElementById(id); }
+
+        function populateLibraries(selectedId) {
+            ApiClient.getJSON(ApiClient.getUrl('Library/VirtualFolders'))
+                .then(function (folders) {
+                    var select = el('selectLibrary');
+                    // Clear loading placeholder
+                    select.innerHTML = '<option value="">— None (disabled) —</option>';
+
+                    folders.forEach(function (folder) {
+                        var opt = document.createElement('option');
+                        opt.value       = folder.ItemId;
+                        opt.textContent = folder.Name + ' (' + (folder.CollectionType || 'mixed') + ')';
+                        if (folder.ItemId === selectedId) opt.selected = true;
+                        select.appendChild(opt);
+                    });
+                })
+                .catch(function (err) {
+                    console.error('[PreRoll] Failed to load libraries:', err);
+                    el('selectLibrary').innerHTML =
+                        '<option value="">⚠ Could not load libraries</option>';
+                });
+        }
+
+        /* ── Load config ──────────────────────────────────────────────── */
+
+        function loadConfig() {
+            ApiClient.getPluginConfiguration(PLUGIN_ID)
+                .then(function (config) {
+                    el('chkTvShows').checked  = config.EnableForTvShows !== false;
+                    el('chkMovies').checked   = config.EnableForMovies  === true;
+                    el('chkRandom').checked   = config.RandomOrder      !== false;
+                    el('txtMaxPreRolls').value = config.MaxPreRolls || 1;
+
+                    populateLibraries(config.PreRollLibraryId || '');
+                })
+                .catch(function (err) {
+                    console.error('[PreRoll] Failed to load config:', err);
+                    Dashboard.alert('Could not load plugin configuration.');
+                });
+        }
+
+        /* ── Save config ──────────────────────────────────────────────── */
+
+        function saveConfig(e) {
+            e.preventDefault();
+            Dashboard.showLoadingMsg();
+
+            ApiClient.getPluginConfiguration(PLUGIN_ID)
+                .then(function (config) {
+                    config.PreRollLibraryId  = el('selectLibrary').value;
+                    config.EnableForTvShows  = el('chkTvShows').checked;
+                    config.EnableForMovies   = el('chkMovies').checked;
+                    config.RandomOrder       = el('chkRandom').checked;
+                    config.MaxPreRolls       = Math.max(1, Math.min(10,
+                        parseInt(el('txtMaxPreRolls').value, 10) || 1));
+
+                    return ApiClient.updatePluginConfiguration(PLUGIN_ID, config);
+                })
+                .then(function () {
+                    Dashboard.processPluginConfigurationUpdateResult();
+                })
+                .catch(function (err) {
+                    Dashboard.hideLoadingMsg();
+                    console.error('[PreRoll] Failed to save config:', err);
+                    Dashboard.alert('Failed to save settings. Check the server logs.');
+                });
+        }
+
+        /* ── Wire up events ───────────────────────────────────────────── */
+
+        document.querySelector('.prerollConfigPage')
+            .addEventListener('pagebeforeshow', loadConfig);
+
+        el('PreRollConfigForm')
+            .addEventListener('submit', saveConfig);
+
+    }());
+    </script>
+</div>
+</body>
+</html>
