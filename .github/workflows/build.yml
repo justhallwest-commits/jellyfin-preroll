@@ -1,0 +1,67 @@
+name: Build & Publish Plugin
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Get version from tag
+        id: vars
+        run: |
+          RAW="${GITHUB_REF_NAME#v}"
+          IFS='.' read -ra P <<< "$RAW"
+          V="${P[0]:-1}.${P[1]:-0}.${P[2]:-0}.0"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "zip=preroll_${V}.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: |
+          dotnet publish Jellyfin.Plugin.PreRoll/Jellyfin.Plugin.PreRoll.csproj \
+            -c Release --no-self-contained -o ./publish \
+            /p:AssemblyVersion=${{ steps.vars.outputs.version }} \
+            /p:FileVersion=${{ steps.vars.outputs.version }}
+
+      - name: Zip
+        run: cd publish && zip -j "../${{ steps.vars.outputs.zip }}" Jellyfin.Plugin.PreRoll.dll
+
+      - name: Checksum
+        id: hash
+        run: echo "md5=$(md5sum ${{ steps.vars.outputs.zip }} | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.vars.outputs.zip }}
+
+      - name: Update manifest
+        run: |
+          URL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/${{ steps.vars.outputs.zip }}"
+          python3 scripts/update_manifest.py \
+            --version "${{ steps.vars.outputs.version }}" \
+            --url "$URL" \
+            --checksum "${{ steps.hash.outputs.md5 }}" \
+            --repo "${{ github.repository }}"
+
+      - name: Commit manifest
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "ci: update manifest for ${{ github.ref_name }}"
+          file_pattern: manifest.json
+          branch: main
