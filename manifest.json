@@ -1,15 +1,16 @@
 [
   {
-    "guid": "f4c1d2a3-8b5e-4f6d-9a7c-3e2b1d0f8a9c",
-    "name": "Preroll & Intros",
-    "overview": "Play videos from a selected library as prerolls before your TV shows and movies — like studio logos, bumpers, or custom intros.",
-    "description": "Preroll & Intros lets you designate any Jellyfin library as a source of preroll videos. These videos play automatically before TV show episodes and/or movies, simulating the experience of studio logos, channel bumpers, or custom intros. Configuration is done entirely through the Jellyfin dashboard. Because it uses Jellyfin's server-side intro injection API, it works on every client — Fire TV, Roku, iOS, Android, web browser, and more.",
+    "guid": "a4b2c3d4-e5f6-7890-abcd-ef1234567891",
+    "name": "Pre-Roll Videos",
+    "description": "Plays videos from a selected library before TV episodes or movies — perfect for studio logos, custom commercials, or broadcast intros.",
+    "overview": "Choose any Jellyfin library as your pre-roll source. Videos from that library will automatically play before TV episodes and/or movies. Supports random order, multiple clips per play, and per-content-type toggles.",
     "owner": "justhallwest-commits",
     "category": "General",
+    "imageUrl": "",
     "versions": [
       {
         "version": "1.1.5.0",
-        "changelog": "Workflow fix: triggers on GitHub UI releases, tag pushes, and manual dispatch.",
+        "changelog": "Fixed CI/CD workflow — builds now trigger on GitHub UI releases, git tag pushes, and manual dispatch.",
         "targetAbi": "10.8.0.0",
         "sourceUrl": "https://github.com/justhallwest-commits/jellyfin-preroll/releases/download/v1.1.5/jellyfin-preroll-v1.1.5.zip",
         "timestamp": "2026-03-25T00:00:00Z"

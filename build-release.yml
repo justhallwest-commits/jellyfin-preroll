@@ -1,18 +1,17 @@
 name: Build & Release Plugin
 
 on:
-  # Triggers when you create a release through the GitHub UI
-  release:
-    types: [created]
-  # Triggers when you push a tag via git CLI
   push:
+    branches:
+      - main
     tags:
       - 'v*'
-  # Manual trigger from the Actions tab — lets you pick a tag
+  release:
+    types: [created]
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. v1.1.4)'
+        description: 'Release tag (e.g. v1.1.5)'
         required: true
 
 jobs:
@@ -22,55 +21,52 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-
-      - name: Determine version tag
-        id: version
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event_name }}" = "release" ]; then
-            echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Setup .NET 6
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '6.0.x'
 
-      - name: Restore dependencies
+      - name: Restore
         run: dotnet restore JellyfinPreroll/JellyfinPreroll.csproj
 
-      - name: Build Release
+      - name: Build
         run: dotnet build JellyfinPreroll/JellyfinPreroll.csproj --configuration Release --no-restore
 
       - name: Publish
         run: dotnet publish JellyfinPreroll/JellyfinPreroll.csproj --configuration Release --no-build --output ./publish
 
-      - name: Package plugin zip
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "release" ]; then
+            echo "value=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "value=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=dev-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package zip
         run: |
           cd publish
-          zip -j ../jellyfin-preroll-${{ steps.version.outputs.tag }}.zip JellyfinPreroll.dll
+          zip -j ../jellyfin-preroll-${{ steps.tag.outputs.value }}.zip JellyfinPreroll.dll
           cd ..
 
-      # For push-tag and workflow_dispatch: create a new release
-      - name: Create GitHub Release
-        if: github.event_name != 'release'
-        uses: softprops/action-gh-release@v2
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          files: jellyfin-preroll-${{ steps.version.outputs.tag }}.zip
-          generate_release_notes: true
+          name: plugin-${{ steps.tag.outputs.value }}
+          path: jellyfin-preroll-${{ steps.tag.outputs.value }}.zip
 
-      # For release-created via GitHub UI: attach the zip to the existing release
-      - name: Upload to existing Release
-        if: github.event_name == 'release'
+      - name: Create or update GitHub Release
+        if: startsWith(steps.tag.outputs.value, 'v')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.release.tag_name }}
-          files: jellyfin-preroll-${{ steps.version.outputs.tag }}.zip
+          tag_name: ${{ steps.tag.outputs.value }}
+          files: jellyfin-preroll-${{ steps.tag.outputs.value }}.zip
+          generate_release_notes: true
