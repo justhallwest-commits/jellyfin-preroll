@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Preroll &amp; Intros</title>
+</head>
+<body>
+    <div id="prerollConfigPage" data-role="page" class="page type-interior pluginConfigurationPage"
+         data-require="emby-select,emby-input,emby-checkbox">
+
+        <div data-role="content">
+            <div class="content-primary">
+
+                <form id="prerollConfigForm">
+                    <div class="sectionTitleContainer flex align-items-center">
+                        <h2 class="sectionTitle">Preroll &amp; Intros Settings</h2>
+                    </div>
+
+                    <p class="description">
+                        Choose a library that contains your preroll videos (studio logos, bumpers, intros, etc.).
+                        These will play automatically before your TV shows and/or movies on <strong>every client</strong>.
+                    </p>
+
+                    <!-- Library picker -->
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="selectPrerollLibrary">Preroll Library</label>
+                        <select is="emby-select" id="selectPrerollLibrary" class="emby-select-withcolor">
+                            <option value="">— None (disabled) —</option>
+                        </select>
+                        <div class="fieldDescription">
+                            Select the library that holds your preroll/intro videos.
+                            Create a dedicated library (type "Movies" or "Mixed Content") for best results.
+                        </div>
+                    </div>
+
+                    <!-- Preroll count -->
+                    <div class="inputContainer">
+                        <label class="inputLabel" for="inputPrerollCount">Number of Prerolls</label>
+                        <input is="emby-input" type="number" id="inputPrerollCount"
+                               min="1" max="5" step="1" value="1" />
+                        <div class="fieldDescription">
+                            How many random videos to play before each item (1–5).
+                        </div>
+                    </div>
+
+                    <!-- Max duration -->
+                    <div class="inputContainer">
+                        <label class="inputLabel" for="inputMaxDuration">Max Duration (seconds)</label>
+                        <input is="emby-input" type="number" id="inputMaxDuration"
+                               min="0" step="1" value="0" />
+                        <div class="fieldDescription">
+                            Skip preroll videos longer than this many seconds. Set to 0 for no limit.
+                        </div>
+                    </div>
+
+                    <!-- Checkboxes -->
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input is="emby-checkbox" type="checkbox" id="chkEnableTvShows" checked />
+                            <span>Play prerolls before TV show episodes</span>
+                        </label>
+                    </div>
+
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input is="emby-checkbox" type="checkbox" id="chkEnableMovies" checked />
+                            <span>Play prerolls before movies</span>
+                        </label>
+                    </div>
+
+                    <br />
+                    <div>
+                        <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                            <span>Save</span>
+                        </button>
+                    </div>
+                </form>
+
+            </div>
+        </div>
+
+    </div>
+
+    <script type="text/javascript">
+        'use strict';
+
+        var pluginId = 'a4b2c3d4-e5f6-7890-abcd-ef1234567891';
+
+        // ── Load virtual folders (libraries) into the dropdown ───────
+        function populateLibraries(selectedId) {
+            ApiClient.getVirtualFolders().then(function (folders) {
+                var select = document.getElementById('selectPrerollLibrary');
+                // Keep the "None" option
+                select.innerHTML = '<option value="">— None (disabled) —</option>';
+
+                folders.forEach(function (folder) {
+                    var option = document.createElement('option');
+                    option.value = folder.ItemId;
+                    option.textContent = folder.Name;
+                    if (folder.ItemId === selectedId) {
+                        option.selected = true;
+                    }
+                    select.appendChild(option);
+                });
+            });
+        }
+
+        // ── Load saved configuration ─────────────────────────────────
+        function loadConfig(page) {
+            ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                populateLibraries(config.PrerollLibraryId || '');
+
+                document.getElementById('inputPrerollCount').value = config.PrerollCount || 1;
+                document.getElementById('inputMaxDuration').value  = config.MaxDurationSeconds || 0;
+                document.getElementById('chkEnableTvShows').checked = config.EnableForTvShows !== false;
+                document.getElementById('chkEnableMovies').checked  = config.EnableForMovies !== false;
+            });
+        }
+
+        // ── Save configuration ───────────────────────────────────────
+        function saveConfig() {
+            ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                config.PrerollLibraryId   = document.getElementById('selectPrerollLibrary').value;
+                config.PrerollCount       = parseInt(document.getElementById('inputPrerollCount').value, 10) || 1;
+                config.MaxDurationSeconds = parseInt(document.getElementById('inputMaxDuration').value, 10) || 0;
+                config.EnableForTvShows   = document.getElementById('chkEnableTvShows').checked;
+                config.EnableForMovies    = document.getElementById('chkEnableMovies').checked;
+
+                ApiClient.updatePluginConfiguration(pluginId, config).then(function () {
+                    Dashboard.processPluginConfigurationUpdateResult();
+                });
+            });
+        }
+
+        // ── Wire up events ───────────────────────────────────────────
+        document.getElementById('prerollConfigPage')
+            .addEventListener('pageshow', function () { loadConfig(this); });
+
+        document.getElementById('prerollConfigForm')
+            .addEventListener('submit', function (e) {
+                e.preventDefault();
+                saveConfig();
+                return false;
+            });
+    </script>
+</body>
+</html>
