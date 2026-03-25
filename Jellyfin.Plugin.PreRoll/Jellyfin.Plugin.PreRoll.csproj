@@ -11,8 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Targets Jellyfin 10.9.x — for 10.8.x change to 10.8.0 and TargetFramework to net6.0 -->
-    <PackageReference Include="Jellyfin.Controller" Version="10.9.0" />
+    <PackageReference Include="Jellyfin.Controller" Version="10.11.0" />
   </ItemGroup>
 
   <ItemGroup>
