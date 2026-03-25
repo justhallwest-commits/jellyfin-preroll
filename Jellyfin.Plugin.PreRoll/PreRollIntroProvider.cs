@@ -17,16 +17,14 @@ public class PreRollServerEntryPoint : IHostedService
     private readonly ILogger<PreRollServerEntryPoint> _logger;
     private readonly object _lock = new();
 
-    // Short window to absorb spurious events fired by SendPlayCommand itself
+    // Only used to absorb the burst of events from SendPlayCommand itself
     private static readonly TimeSpan CommandCooldown = TimeSpan.FromSeconds(10);
-
-    private enum SessionState { Idle, CommandSent, PreRollPlaying, MainItemPlaying }
 
     private sealed class SessionInfo
     {
-        public SessionState State       { get; set; } = SessionState.Idle;
-        public Guid         MainItemId  { get; set; }
-        public DateTime     CommandSentAt { get; set; }
+        public Guid     MainItemId    { get; set; }
+        public bool     CommandSent   { get; set; }
+        public DateTime CommandSentAt { get; set; }
     }
 
     private readonly Dictionary<string, SessionInfo> _sessions
@@ -46,15 +44,13 @@ public class PreRollServerEntryPoint : IHostedService
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        _sessionManager.PlaybackStart   += OnPlaybackStart;
-        _sessionManager.PlaybackStopped += OnPlaybackStopped;
+        _sessionManager.PlaybackStart += OnPlaybackStart;
         return Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        _sessionManager.PlaybackStart   -= OnPlaybackStart;
-        _sessionManager.PlaybackStopped -= OnPlaybackStopped;
+        _sessionManager.PlaybackStart -= OnPlaybackStart;
         return Task.CompletedTask;
     }
 
@@ -67,46 +63,43 @@ public class PreRollServerEntryPoint : IHostedService
 
         lock (_lock)
         {
-            var info = GetOrCreate(session.Id);
-
-            // ── This item is a pre-roll ──────────────────────────────────
+            // Never inject before a pre-roll item
             if (_preRollItemIds.Contains(item.Id))
             {
-                if (info.State == SessionState.CommandSent)
-                    info.State = SessionState.PreRollPlaying;
-                _logger.LogDebug("Pre-Roll: '{Name}' is a pre-roll — now playing.", item.Name);
+                _logger.LogDebug("Pre-Roll: '{Name}' is a pre-roll — skipping.", item.Name);
                 return;
             }
 
-            // ── This item is the main item starting after our command ────
-            if (info.State == SessionState.CommandSent
-                || info.State == SessionState.PreRollPlaying)
+            if (_sessions.TryGetValue(session.Id, out var info))
             {
-                if (info.MainItemId == item.Id)
+                // Within the short command cooldown — absorb spurious events
+                if (info.CommandSent
+                    && DateTime.UtcNow - info.CommandSentAt < CommandCooldown)
                 {
-                    info.State = SessionState.MainItemPlaying;
                     _logger.LogDebug(
-                        "Pre-Roll: Main item '{Name}' now playing on session {Id}.",
-                        item.Name, session.Id);
+                        "Pre-Roll: Session {Id} in command cooldown — suppressing.", session.Id);
                     return;
                 }
-            }
 
-            // ── Spurious event within command cooldown ───────────────────
-            if (info.State == SessionState.CommandSent
-                && DateTime.UtcNow - info.CommandSentAt < CommandCooldown)
-            {
+                // Same main item starting after pre-roll finished — let it play
+                if (info.CommandSent && info.MainItemId == item.Id)
+                {
+                    _logger.LogDebug(
+                        "Pre-Roll: Main item '{Name}' starting after pre-roll on session {Id}.",
+                        item.Name, session.Id);
+                    // Clear so the NEXT episode is eligible
+                    _sessions.Remove(session.Id);
+                    return;
+                }
+
+                // Different item — user picked something new, reset and fall through
                 _logger.LogDebug(
-                    "Pre-Roll: Suppressing spurious event within cooldown on session {Id}.",
-                    session.Id);
-                return;
+                    "Pre-Roll: New item on session {Id} — resetting state.", session.Id);
+                _sessions.Remove(session.Id);
             }
-
-            // ── Already playing main item — don't re-inject ──────────────
-            if (info.State == SessionState.MainItemPlaying) return;
         }
 
-        // ── Decide whether to inject ─────────────────────────────────────
+        // Check content type
         bool shouldApply = item switch
         {
             Episode => config.EnableForTvShows,
@@ -137,10 +130,12 @@ public class PreRollServerEntryPoint : IHostedService
             foreach (var v in selected)
                 _preRollItemIds.Add(v.Id);
 
-            var info = GetOrCreate(session.Id);
-            info.State        = SessionState.CommandSent;
-            info.MainItemId   = item.Id;
-            info.CommandSentAt = DateTime.UtcNow;
+            _sessions[session.Id] = new SessionInfo
+            {
+                MainItemId    = item.Id,
+                CommandSent   = true,
+                CommandSentAt = DateTime.UtcNow
+            };
         }
 
         var newQueue = selected.Select(v => v.Id).Append(item.Id).ToArray();
@@ -171,44 +166,5 @@ public class PreRollServerEntryPoint : IHostedService
                 lock (_lock) { _sessions.Remove(session.Id); }
             }
         });
-    }
-
-    private void OnPlaybackStopped(object? sender, PlaybackStopEventArgs e)
-    {
-        if (e.Item is null || e.Session is null) return;
-
-        lock (_lock)
-        {
-            if (!_sessions.TryGetValue(e.Session.Id, out var info)) return;
-
-            // Main item finished — reset to Idle so the next episode gets a pre-roll
-            if (info.State == SessionState.MainItemPlaying
-                && info.MainItemId == e.Item.Id)
-            {
-                _sessions.Remove(e.Session.Id);
-                _logger.LogDebug(
-                    "Pre-Roll: Session {Id} reset — ready for next episode.", e.Session.Id);
-                return;
-            }
-
-            // Pre-roll stopped unexpectedly (user skipped) — keep state so
-            // main item still plays without re-injecting
-            if (info.State == SessionState.PreRollPlaying
-                && _preRollItemIds.Contains(e.Item.Id))
-            {
-                _logger.LogDebug(
-                    "Pre-Roll: Pre-roll stopped on session {Id} — waiting for main item.", e.Session.Id);
-            }
-        }
-    }
-
-    private SessionInfo GetOrCreate(string sessionId)
-    {
-        if (!_sessions.TryGetValue(sessionId, out var info))
-        {
-            info = new SessionInfo();
-            _sessions[sessionId] = info;
-        }
-        return info;
     }
 }
