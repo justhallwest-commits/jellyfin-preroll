@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <RootNamespace>JellyfinPreroll</RootNamespace>
+    <AssemblyName>JellyfinPreroll</AssemblyName>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Jellyfin.Controller" Version="10.8.*" />
+    <PackageReference Include="Jellyfin.Model" Version="10.8.*" />
+  </ItemGroup>
+
+  <!-- Prevent Jellyfin assemblies from being copied into output (they already exist on the server) -->
+  <ItemGroup>
+    <PackageReference Update="Jellyfin.Controller" Private="false" />
+    <PackageReference Update="Jellyfin.Model" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Configuration/configPage.html" />
+  </ItemGroup>
+
+</Project>
