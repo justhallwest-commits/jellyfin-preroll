@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <PackageReference Include="Jellyfin.Controller" Version="10.11.0" />
+    <PackageReference Include="Jellyfin.Database.Implementations" Version="10.11.0" />
   </ItemGroup>
 
   <ItemGroup>
