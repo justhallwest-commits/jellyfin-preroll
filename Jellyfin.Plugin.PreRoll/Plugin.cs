@@ -31,9 +31,10 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     public override Guid Id => StaticId;
 
     /// <inheritdoc />
-    public override string Description =>
-        "Plays videos from a selected library before TV episodes or movies — " +
-        "perfect for studio logos, custom commercials, or broadcast intros.";
+   public override string Description =>
+    "Plays videos from a selected library before TV episodes or movies — " +
+    "works on all clients including Fire TV. Perfect for studio logos, " +
+    "custom commercials, or broadcast intros.";
 
     /// <inheritdoc />
     public IEnumerable<PluginPageInfo> GetPages()
