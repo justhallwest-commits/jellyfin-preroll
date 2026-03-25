@@ -39,7 +39,7 @@ def main():
     parser.add_argument("--url",       required=True, help="Download URL for the plugin zip")
     parser.add_argument("--checksum",  required=True, help="MD5 checksum of the zip")
     parser.add_argument("--repo",      required=True, help="GitHub repo in owner/name format")
-    parser.add_argument("--abi",       default="10.9.0.0", help="Target Jellyfin ABI version")
+    parser.add_argument("--abi", default="10.11.0.0", help="Target Jellyfin ABI version")
     args = parser.parse_args()
 
     # Load existing manifest or start fresh
