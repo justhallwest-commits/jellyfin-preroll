@@ -17,15 +17,15 @@ public class PreRollServerEntryPoint : IHostedService
     private readonly ILogger<PreRollServerEntryPoint> _logger;
     private readonly object _lock = new();
 
-    // Per-session state machine
     private enum State { Idle, Injected }
+
     private readonly Dictionary<string, (State State, Guid MainItemId, DateTime InjectedAt)> _sessions
         = new(StringComparer.OrdinalIgnoreCase);
 
-    // How long to suppress re-injection after sending a play command
-    private static readonly TimeSpan Cooldown = TimeSpan.FromSeconds(30);
+    // How long after injection to suppress re-injection
+    // Must be longer than the longest pre-roll clip
+    private static readonly TimeSpan Cooldown = TimeSpan.FromMinutes(10);
 
-    // Ids of items in the pre-roll library
     private readonly HashSet<Guid> _preRollItemIds = new();
 
     public PreRollServerEntryPoint(
@@ -62,30 +62,29 @@ public class PreRollServerEntryPoint : IHostedService
 
         lock (_lock)
         {
-            // Always skip pre-roll items — never inject before a pre-roll
+            // This item is from the pre-roll library — never inject before it
             if (_preRollItemIds.Contains(item.Id))
             {
-                _logger.LogDebug("Pre-Roll: '{Name}' is a pre-roll item — skipping.", item.Name);
+                _logger.LogDebug("Pre-Roll: '{Name}' is a pre-roll — skipping.", item.Name);
                 return;
             }
 
-            // If we are in Injected state for this session, suppress until cooldown expires
+            // Within cooldown window — this is the main episode starting
+            // after the pre-roll finished. Suppress injection.
             if (_sessions.TryGetValue(session.Id, out var s) && s.State == State.Injected)
             {
-                // Still within cooldown — this is the main item starting after the pre-roll
                 if (DateTime.UtcNow - s.InjectedAt < Cooldown)
                 {
                     _logger.LogDebug(
-                        "Pre-Roll: Session {Id} in cooldown — not re-injecting.", session.Id);
+                        "Pre-Roll: Session {Id} in cooldown — suppressing.", session.Id);
                     return;
                 }
 
-                // Cooldown expired — treat as fresh (user started something new)
+                // Cooldown expired — user started something new
                 _sessions.Remove(session.Id);
             }
         }
 
-        // Check content type
         bool shouldApply = item switch
         {
             Episode => config.EnableForTvShows,
@@ -94,7 +93,6 @@ public class PreRollServerEntryPoint : IHostedService
         };
         if (!shouldApply) return;
 
-        // Resolve library
         if (string.IsNullOrWhiteSpace(config.PreRollLibraryId) ||
             !Guid.TryParse(config.PreRollLibraryId, out var libraryId))
             return;
@@ -118,7 +116,9 @@ public class PreRollServerEntryPoint : IHostedService
             foreach (var v in selected)
                 _preRollItemIds.Add(v.Id);
 
-            // Enter Injected state — suppress re-injection for Cooldown period
+            // Set Injected state BEFORE sending the command so any
+            // PlaybackStopped/Start events fired by SendPlayCommand
+            // are already suppressed
             _sessions[session.Id] = (State.Injected, item.Id, DateTime.UtcNow);
         }
 
@@ -130,8 +130,7 @@ public class PreRollServerEntryPoint : IHostedService
 
         _ = Task.Run(async () =>
         {
-            // Small delay so the current PlaybackStart event fully resolves first
-            await Task.Delay(500).ConfigureAwait(false);
+            await Task.Delay(300).ConfigureAwait(false);
             try
             {
                 await _sessionManager.SendPlayCommand(
@@ -147,8 +146,7 @@ public class PreRollServerEntryPoint : IHostedService
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Pre-Roll: Failed to send play command to session {Id}.", session.Id);
-                // Roll back state so the next attempt works
+                _logger.LogError(ex, "Pre-Roll: Failed to send play command.");
                 lock (_lock) { _sessions.Remove(session.Id); }
             }
         });
@@ -160,14 +158,24 @@ public class PreRollServerEntryPoint : IHostedService
 
         lock (_lock)
         {
-            // When the main item finishes, reset to Idle so the next episode gets a pre-roll
-            if (_sessions.TryGetValue(e.Session.Id, out var s)
-                && s.State == State.Injected
-                && s.MainItemId == e.Item.Id)
+            if (!_sessions.TryGetValue(e.Session.Id, out var s)) return;
+            if (s.State != State.Injected) return;
+            if (s.MainItemId != e.Item.Id) return;
+
+            // Only clear the guard when the main item stops AFTER the cooldown.
+            // Within the cooldown, the stop was caused by our own SendPlayCommand
+            // replacing the queue — keep the guard active so the re-triggered
+            // PlaybackStart for the main item doesn't cause another injection.
+            if (DateTime.UtcNow - s.InjectedAt >= Cooldown)
             {
                 _sessions.Remove(e.Session.Id);
                 _logger.LogDebug(
-                    "Pre-Roll: Session {Id} reset after main item finished.", e.Session.Id);
+                    "Pre-Roll: Session {Id} cleared after main item finished.", e.Session.Id);
+            }
+            else
+            {
+                _logger.LogDebug(
+                    "Pre-Roll: Session {Id} stop within cooldown — keeping guard.", e.Session.Id);
             }
         }
     }
