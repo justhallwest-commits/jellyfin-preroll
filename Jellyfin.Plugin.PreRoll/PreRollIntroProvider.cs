@@ -17,19 +17,17 @@ public class PreRollServerEntryPoint : IHostedService
     private readonly ILogger<PreRollServerEntryPoint> _logger;
     private readonly object _lock = new();
 
-    // Only used to absorb the burst of events from SendPlayCommand itself
-    private static readonly TimeSpan CommandCooldown = TimeSpan.FromSeconds(10);
+    // After injecting, suppress re-injection for the SAME item for this many seconds.
+    // This blocks the spurious PlaybackStart that fires when our own SendPlayCommand
+    // hands the episode back to the client after the pre-roll finishes.
+    // Any DIFFERENT item always gets a fresh pre-roll immediately.
+    private static readonly TimeSpan SameItemWindow = TimeSpan.FromSeconds(30);
 
-    private sealed class SessionInfo
-    {
-        public Guid     MainItemId    { get; set; }
-        public bool     CommandSent   { get; set; }
-        public DateTime CommandSentAt { get; set; }
-    }
-
-    private readonly Dictionary<string, SessionInfo> _sessions
+    // Per session: the last item we injected a pre-roll for, and when
+    private readonly Dictionary<string, (Guid ItemId, DateTime At)> _lastInjection
         = new(StringComparer.OrdinalIgnoreCase);
 
+    // Ids of items that live in the pre-roll library
     private readonly HashSet<Guid> _preRollItemIds = new();
 
     public PreRollServerEntryPoint(
@@ -63,39 +61,23 @@ public class PreRollServerEntryPoint : IHostedService
 
         lock (_lock)
         {
-            // Never inject before a pre-roll item
+            // This item lives in the pre-roll library — never inject before it
             if (_preRollItemIds.Contains(item.Id))
             {
-                _logger.LogDebug("Pre-Roll: '{Name}' is a pre-roll — skipping.", item.Name);
+                _logger.LogDebug("Pre-Roll: '{Name}' is a pre-roll item — skipping.", item.Name);
                 return;
             }
 
-            if (_sessions.TryGetValue(session.Id, out var info))
+            // Same item started again within the suppression window —
+            // this is the episode resuming after our pre-roll finished
+            if (_lastInjection.TryGetValue(session.Id, out var last)
+                && last.ItemId == item.Id
+                && DateTime.UtcNow - last.At < SameItemWindow)
             {
-                // Within the short command cooldown — absorb spurious events
-                if (info.CommandSent
-                    && DateTime.UtcNow - info.CommandSentAt < CommandCooldown)
-                {
-                    _logger.LogDebug(
-                        "Pre-Roll: Session {Id} in command cooldown — suppressing.", session.Id);
-                    return;
-                }
-
-                // Same main item starting after pre-roll finished — let it play
-                if (info.CommandSent && info.MainItemId == item.Id)
-                {
-                    _logger.LogDebug(
-                        "Pre-Roll: Main item '{Name}' starting after pre-roll on session {Id}.",
-                        item.Name, session.Id);
-                    // Clear so the NEXT episode is eligible
-                    _sessions.Remove(session.Id);
-                    return;
-                }
-
-                // Different item — user picked something new, reset and fall through
                 _logger.LogDebug(
-                    "Pre-Roll: New item on session {Id} — resetting state.", session.Id);
-                _sessions.Remove(session.Id);
+                    "Pre-Roll: Same item '{Name}' within {Window}s window on session {Id} — suppressing.",
+                    item.Name, SameItemWindow.TotalSeconds, session.Id);
+                return;
             }
         }
 
@@ -130,12 +112,9 @@ public class PreRollServerEntryPoint : IHostedService
             foreach (var v in selected)
                 _preRollItemIds.Add(v.Id);
 
-            _sessions[session.Id] = new SessionInfo
-            {
-                MainItemId    = item.Id,
-                CommandSent   = true,
-                CommandSentAt = DateTime.UtcNow
-            };
+            // Record this injection before sending the command so any
+            // events fired by SendPlayCommand are already suppressed
+            _lastInjection[session.Id] = (item.Id, DateTime.UtcNow);
         }
 
         var newQueue = selected.Select(v => v.Id).Append(item.Id).ToArray();
@@ -163,7 +142,7 @@ public class PreRollServerEntryPoint : IHostedService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Pre-Roll: Failed to send play command.");
-                lock (_lock) { _sessions.Remove(session.Id); }
+                lock (_lock) { _lastInjection.Remove(session.Id); }
             }
         });
     }
