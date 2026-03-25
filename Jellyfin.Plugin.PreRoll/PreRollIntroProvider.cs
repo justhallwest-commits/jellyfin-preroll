@@ -4,6 +4,7 @@ using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Entities;
+using MediaBrowser.Model.Querying;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.PreRoll;
@@ -48,7 +49,6 @@ public class PreRollIntroProvider : IIntroProvider
         var query = new InternalItemsQuery(user)
         {
             ParentId      = libraryId,
-            MediaTypes    = [MediaType.Video],
             Recursive     = true,
             IsVirtualItem = false
         };
