@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Jellyfin.Data.Entities;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
@@ -13,10 +14,9 @@ using Microsoft.Extensions.Logging;
 namespace JellyfinPreroll;
 
 /// <summary>
-/// Server-side intro provider.  Jellyfin calls <see cref="GetIntros"/> every
-/// time a client starts playback.  Because this runs on the server and returns
-/// items through the standard API, it works on <b>every</b> client — web,
-/// Fire TV, Roku, iOS, Android, etc.
+/// Server-side intro provider. Jellyfin calls <see cref="GetIntros"/> every
+/// time a client starts playback. Because this runs on the server, it works
+/// on every client — web, Fire TV, Roku, iOS, Android, etc.
 /// </summary>
 public class PrerollIntroProvider : IIntroProvider
 {
@@ -33,7 +33,7 @@ public class PrerollIntroProvider : IIntroProvider
     }
 
     /// <inheritdoc />
-    public string Name => "Preroll & Intros";
+    public string Name => "Pre-Roll Videos";
 
     /// <inheritdoc />
     public Task<IEnumerable<IntroInfo>> GetIntros(BaseItem item, User user)
@@ -55,18 +55,15 @@ public class PrerollIntroProvider : IIntroProvider
         if (config is null)
             return Enumerable.Empty<IntroInfo>();
 
-        // ── Guard: is the plugin configured? ──────────────────────────
         if (string.IsNullOrWhiteSpace(config.PrerollLibraryId))
         {
             _logger.LogDebug("Preroll library not configured — skipping");
             return Enumerable.Empty<IntroInfo>();
         }
 
-        // ── Guard: should we add prerolls for this item type? ─────────
         if (!ShouldAddPreroll(item, config))
             return Enumerable.Empty<IntroInfo>();
 
-        // ── Fetch candidate videos from the preroll library ───────────
         var prerollVideos = GetPrerollVideos(config);
         if (prerollVideos.Count == 0)
         {
@@ -74,7 +71,6 @@ public class PrerollIntroProvider : IIntroProvider
             return Enumerable.Empty<IntroInfo>();
         }
 
-        // ── Pick random videos ────────────────────────────────────────
         int count = Math.Clamp(config.PrerollCount, 1, 5);
         count = Math.Min(count, prerollVideos.Count);
 
@@ -89,23 +85,16 @@ public class PrerollIntroProvider : IIntroProvider
         return selected.Select(v => new IntroInfo { ItemId = v.Id });
     }
 
-    /// <summary>
-    /// Decides whether the currently-playing item should get prerolls.
-    /// </summary>
     private static bool ShouldAddPreroll(BaseItem item, PluginConfiguration config)
     {
         return item switch
         {
-            Episode   => config.EnableForTvShows,
-            Movie     => config.EnableForMovies,
-            _         => false
+            Episode => config.EnableForTvShows,
+            Movie   => config.EnableForMovies,
+            _       => false
         };
     }
 
-    /// <summary>
-    /// Returns all videos in the configured preroll library, optionally
-    /// filtered by a maximum duration.
-    /// </summary>
     private List<BaseItem> GetPrerollVideos(PluginConfiguration config)
     {
         if (!Guid.TryParse(config.PrerollLibraryId, out var libraryId))
@@ -122,7 +111,6 @@ public class PrerollIntroProvider : IIntroProvider
         var results = _libraryManager.GetItemsResult(query);
         var videos = results.Items.ToList();
 
-        // Optional duration filter
         if (config.MaxDurationSeconds > 0)
         {
             var maxTicks = TimeSpan.FromSeconds(config.MaxDurationSeconds).Ticks;
