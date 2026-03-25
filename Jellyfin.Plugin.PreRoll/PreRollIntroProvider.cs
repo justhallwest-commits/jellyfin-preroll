@@ -16,9 +16,13 @@ public class PreRollServerEntryPoint : IHostedService
     private readonly ILibraryManager _libraryManager;
     private readonly ILogger<PreRollServerEntryPoint> _logger;
 
-    private readonly HashSet<string> _injectedSessions =
-        new(StringComparer.OrdinalIgnoreCase);
     private readonly object _lock = new();
+
+    // Sessions we have injected a pre-roll into, mapped to the main item id
+    private readonly Dictionary<string, Guid> _injectedSessions =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    // Ids of items that live in the pre-roll library
     private readonly HashSet<Guid> _preRollItemIds = new();
 
     public PreRollServerEntryPoint(
@@ -50,15 +54,26 @@ public class PreRollServerEntryPoint : IHostedService
         var config = Plugin.Instance?.Configuration;
         if (config is null) return;
 
-        var item = e.Item;
+        var item    = e.Item;
         var session = e.Session;
         if (item is null || session is null) return;
 
         lock (_lock)
         {
+            // This item is a pre-roll — do nothing
             if (_preRollItemIds.Contains(item.Id))
             {
                 _logger.LogDebug("Pre-Roll: Skipping — item is a pre-roll.");
+                return;
+            }
+
+            // Already injected for this session+item combo — do nothing
+            // (fires when the main episode starts after the pre-roll finishes)
+            if (_injectedSessions.TryGetValue(session.Id, out var trackedId)
+                && trackedId == item.Id)
+            {
+                _logger.LogDebug(
+                    "Pre-Roll: Main item already handled for session {Id}.", session.Id);
                 return;
             }
         }
@@ -70,12 +85,6 @@ public class PreRollServerEntryPoint : IHostedService
             _       => false
         };
         if (!shouldApply) return;
-
-        lock (_lock)
-        {
-            if (_injectedSessions.Contains(session.Id))
-                return;
-        }
 
         if (string.IsNullOrWhiteSpace(config.PreRollLibraryId) ||
             !Guid.TryParse(config.PreRollLibraryId, out var libraryId))
@@ -90,7 +99,7 @@ public class PreRollServerEntryPoint : IHostedService
 
         if (videos.Count == 0) return;
 
-        int max = Math.Clamp(config.MaxPreRolls, 1, 10);
+        int max      = Math.Clamp(config.MaxPreRolls, 1, 10);
         var selected = config.RandomOrder
             ? videos.OrderBy(_ => Random.Shared.Next()).Take(max).ToList()
             : videos.Take(max).ToList();
@@ -99,7 +108,9 @@ public class PreRollServerEntryPoint : IHostedService
         {
             foreach (var v in selected)
                 _preRollItemIds.Add(v.Id);
-            _injectedSessions.Add(session.Id);
+
+            // Track session → main item so we skip when main item starts
+            _injectedSessions[session.Id] = item.Id;
         }
 
         var newQueue = selected.Select(v => v.Id).Append(item.Id).ToArray();
@@ -136,8 +147,15 @@ public class PreRollServerEntryPoint : IHostedService
 
         lock (_lock)
         {
-            if (_preRollItemIds.Contains(e.Item.Id))
+            // Only clear the session guard when the MAIN item finishes,
+            // not when the pre-roll finishes — this breaks the loop
+            if (_injectedSessions.TryGetValue(e.Session.Id, out var trackedId)
+                && trackedId == e.Item.Id)
+            {
                 _injectedSessions.Remove(e.Session.Id);
+                _logger.LogDebug(
+                    "Pre-Roll: Cleared session {Id} after main item finished.", e.Session.Id);
+            }
         }
     }
 }
