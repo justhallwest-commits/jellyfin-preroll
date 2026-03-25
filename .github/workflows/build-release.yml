@@ -1,0 +1,72 @@
+name: Build & Release Plugin
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  release:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.1.5)'
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 6
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+
+      - name: Restore
+        run: dotnet restore JellyfinPreroll/JellyfinPreroll.csproj
+
+      - name: Build
+        run: dotnet build JellyfinPreroll/JellyfinPreroll.csproj --configuration Release --no-restore
+
+      - name: Publish
+        run: dotnet publish JellyfinPreroll/JellyfinPreroll.csproj --configuration Release --no-build --output ./publish
+
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "release" ]; then
+            echo "value=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "value=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=dev-${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Package zip
+        run: |
+          cd publish
+          zip -j ../jellyfin-preroll-${{ steps.tag.outputs.value }}.zip JellyfinPreroll.dll
+          cd ..
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-${{ steps.tag.outputs.value }}
+          path: jellyfin-preroll-${{ steps.tag.outputs.value }}.zip
+
+      - name: Create or update GitHub Release
+        if: startsWith(steps.tag.outputs.value, 'v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.value }}
+          files: jellyfin-preroll-${{ steps.tag.outputs.value }}.zip
+          generate_release_notes: true
