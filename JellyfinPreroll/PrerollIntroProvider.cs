@@ -7,16 +7,15 @@ using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
-using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Querying;
 using Microsoft.Extensions.Logging;
 
 namespace JellyfinPreroll;
 
 /// <summary>
-/// Server-side intro provider. Jellyfin calls <see cref="GetIntros"/> every
-/// time a client starts playback. Because this runs on the server, it works
-/// on every client — web, Fire TV, Roku, iOS, Android, etc.
+/// Server-side intro provider. Jellyfin calls GetIntros every time a client
+/// starts playback. Because this runs on the server, it works on every
+/// client — web, Fire TV, Roku, iOS, Android, etc.
 /// </summary>
 public class PrerollIntroProvider : IIntroProvider
 {
@@ -103,13 +102,15 @@ public class PrerollIntroProvider : IIntroProvider
         var query = new InternalItemsQuery
         {
             ParentId = libraryId,
-            IncludeItemTypes = new[] { BaseItemKind.Video, BaseItemKind.Movie },
             IsVirtualItem = false,
             Recursive = true
         };
 
         var results = _libraryManager.GetItemsResult(query);
-        var videos = results.Items.ToList();
+
+        var videos = results.Items
+            .Where(v => v is Video or Movie)
+            .ToList();
 
         if (config.MaxDurationSeconds > 0)
         {
