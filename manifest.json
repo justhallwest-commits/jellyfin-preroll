@@ -10,10 +10,10 @@
     "versions": [
       {
         "version": "1.2.6.0",
-        "changelog": "First working release for Jellyfin 10.11.x — .NET 9, correct SDK references, server-side intro injection on all clients.",
+        "changelog": "First working release for Jellyfin 10.11.x",
         "targetAbi": "10.11.0.0",
         "sourceUrl": "https://github.com/justhallwest-commits/jellyfin-preroll/releases/download/v1.2.6/jellyfin-preroll-v1.2.6.zip",
-        "timestamp": "2026-03-25T00:00:00Z"
+        "timestamp": "2026-03-26T00:00:00Z"
       }
     ]
   }
