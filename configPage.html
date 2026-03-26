@@ -15,24 +15,23 @@
                         <h2 class="sectionTitle">Pre-Roll Videos Settings</h2>
                     </div>
 
+                    <div id="debugMsg" style="color: orange; margin-bottom: 1em; display: none;"></div>
+
                     <p class="description">
                         Choose a library that contains your preroll videos (studio logos, bumpers, intros, etc.).
                         These will play automatically before your TV shows and/or movies on <strong>every client</strong>.
                     </p>
 
-                    <!-- Library picker -->
                     <div class="selectContainer">
                         <label class="selectLabel" for="selectPrerollLibrary">Preroll Library</label>
                         <select is="emby-select" id="selectPrerollLibrary" class="emby-select-withcolor">
-                            <option value="">— None (disabled) —</option>
+                            <option value="">— Loading libraries... —</option>
                         </select>
                         <div class="fieldDescription">
                             Select the library that holds your preroll/intro videos.
-                            Create a dedicated library (type "Movies" or "Mixed Content") for best results.
                         </div>
                     </div>
 
-                    <!-- Preroll count -->
                     <div class="inputContainer">
                         <label class="inputLabel" for="inputPrerollCount">Number of Prerolls</label>
                         <input is="emby-input" type="number" id="inputPrerollCount"
@@ -42,7 +41,6 @@
                         </div>
                     </div>
 
-                    <!-- Max duration -->
                     <div class="inputContainer">
                         <label class="inputLabel" for="inputMaxDuration">Max Duration (seconds)</label>
                         <input is="emby-input" type="number" id="inputMaxDuration"
@@ -52,7 +50,6 @@
                         </div>
                     </div>
 
-                    <!-- Checkboxes -->
                     <div class="checkboxContainer checkboxContainer-withDescription">
                         <label class="emby-checkbox-label">
                             <input is="emby-checkbox" type="checkbox" id="chkEnableTvShows" checked />
@@ -85,57 +82,179 @@
 
         var pluginId = 'a4b2c3d4-e5f6-7890-abcd-ef1234567891';
 
-        // ── Load virtual folders (libraries) into the dropdown ───────
-        function populateLibraries(selectedId) {
-            ApiClient.getVirtualFolders().then(function (folders) {
-                var select = document.getElementById('selectPrerollLibrary');
-                // Keep the "None" option
-                select.innerHTML = '<option value="">— None (disabled) —</option>';
+        function showDebug(msg) {
+            var el = document.getElementById('debugMsg');
+            el.style.display = 'block';
+            el.innerHTML += msg + '<br>';
+        }
 
-                folders.forEach(function (folder) {
-                    // 10.11 uses Id, older versions use ItemId
-                    var folderId = folder.Id || folder.ItemId || '';
-                    var option = document.createElement('option');
-                    option.value = folderId;
-                    option.textContent = folder.Name;
-                    if (folderId === selectedId) {
-                        option.selected = true;
+        // ── Get auth header from any available source ────────────────
+        function getAuthHeaders() {
+            var headers = { 'Content-Type': 'application/json' };
+
+            // Try ApiClient first
+            if (window.ApiClient && window.ApiClient.accessToken && window.ApiClient.accessToken()) {
+                headers['Authorization'] = 'MediaBrowser Token="' + window.ApiClient.accessToken() + '"';
+                return headers;
+            }
+
+            // Try extracting from credentials store
+            try {
+                var creds = JSON.parse(localStorage.getItem('jellyfin_credentials') || '{}');
+                if (creds.Servers && creds.Servers.length > 0) {
+                    var token = creds.Servers[0].AccessToken;
+                    if (token) {
+                        headers['Authorization'] = 'MediaBrowser Token="' + token + '"';
+                        return headers;
                     }
-                    select.appendChild(option);
+                }
+            } catch (e) {}
+
+            // Try other common storage keys
+            try {
+                var keys = Object.keys(localStorage);
+                for (var i = 0; i < keys.length; i++) {
+                    var key = keys[i];
+                    if (key.indexOf('AccessToken') >= 0 || key.indexOf('accessToken') >= 0) {
+                        var val = localStorage.getItem(key);
+                        if (val && val.length > 10 && val.length < 200) {
+                            headers['Authorization'] = 'MediaBrowser Token="' + val + '"';
+                            return headers;
+                        }
+                    }
+                    // Jellyfin 10.11 stores credentials differently
+                    if (key.indexOf('credentials') >= 0 || key.indexOf('server') >= 0) {
+                        try {
+                            var parsed = JSON.parse(localStorage.getItem(key));
+                            var token = parsed.AccessToken || (parsed.Servers && parsed.Servers[0] && parsed.Servers[0].AccessToken);
+                            if (token) {
+                                headers['Authorization'] = 'MediaBrowser Token="' + token + '"';
+                                return headers;
+                            }
+                        } catch (e2) {}
+                    }
+                }
+            } catch (e) {}
+
+            return headers;
+        }
+
+        // ── Get base URL ─────────────────────────────────────────────
+        function getBaseUrl() {
+            if (window.ApiClient && window.ApiClient.serverAddress) {
+                try { return window.ApiClient.serverAddress(); } catch(e) {}
+            }
+            // Fall back to current page origin
+            return window.location.origin;
+        }
+
+        // ── API helper ───────────────────────────────────────────────
+        function apiGet(path) {
+            return fetch(getBaseUrl() + path, { headers: getAuthHeaders() })
+                .then(function (r) {
+                    if (!r.ok) throw new Error('HTTP ' + r.status + ' on ' + path);
+                    return r.json();
                 });
+        }
+
+        function apiPost(path, body) {
+            var h = getAuthHeaders();
+            h['Content-Type'] = 'application/json';
+            return fetch(getBaseUrl() + path, {
+                method: 'POST',
+                headers: h,
+                body: JSON.stringify(body)
+            }).then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status + ' on ' + path);
+                return r;
             });
         }
 
-        // ── Load saved configuration ─────────────────────────────────
-        function loadConfig(page) {
-            ApiClient.getPluginConfiguration(pluginId).then(function (config) {
-                populateLibraries(config.PrerollLibraryId || '');
+        // ── Populate dropdown ────────────────────────────────────────
+        function populateLibraries(selectedId) {
+            apiGet('/Library/VirtualFolders')
+                .then(function (folders) {
+                    var select = document.getElementById('selectPrerollLibrary');
+                    select.innerHTML = '<option value="">— None (disabled) —</option>';
 
-                document.getElementById('inputPrerollCount').value = config.PrerollCount || 1;
-                document.getElementById('inputMaxDuration').value  = config.MaxDurationSeconds || 0;
-                document.getElementById('chkEnableTvShows').checked = config.EnableForTvShows !== false;
-                document.getElementById('chkEnableMovies').checked  = config.EnableForMovies !== false;
-            });
+                    if (!folders || folders.length === 0) {
+                        showDebug('API returned 0 libraries.');
+                        return;
+                    }
+
+                    folders.forEach(function (folder) {
+                        var folderId = folder.ItemId || folder.Id || folder.LibraryId || '';
+                        var option = document.createElement('option');
+                        option.value = folderId;
+                        option.textContent = folder.Name;
+                        if (folderId === selectedId) {
+                            option.selected = true;
+                        }
+                        select.appendChild(option);
+                    });
+                })
+                .catch(function (err) {
+                    showDebug('Failed to load libraries: ' + err.message);
+                    var select = document.getElementById('selectPrerollLibrary');
+                    select.innerHTML = '<option value="">— Error loading libraries —</option>';
+                });
         }
 
-        // ── Save configuration ───────────────────────────────────────
+        // ── Load config ──────────────────────────────────────────────
+        function loadConfig() {
+            apiGet('/Plugins/' + pluginId + '/Configuration')
+                .then(function (config) {
+                    populateLibraries(config.PrerollLibraryId || '');
+                    document.getElementById('inputPrerollCount').value = config.PrerollCount || 1;
+                    document.getElementById('inputMaxDuration').value  = config.MaxDurationSeconds || 0;
+                    document.getElementById('chkEnableTvShows').checked = config.EnableForTvShows !== false;
+                    document.getElementById('chkEnableMovies').checked  = config.EnableForMovies !== false;
+                })
+                .catch(function (err) {
+                    showDebug('Config load error: ' + err.message + ' — loading libraries anyway...');
+                    populateLibraries('');
+                });
+        }
+
+        // ── Save config ──────────────────────────────────────────────
         function saveConfig() {
-            ApiClient.getPluginConfiguration(pluginId).then(function (config) {
-                config.PrerollLibraryId   = document.getElementById('selectPrerollLibrary').value;
-                config.PrerollCount       = parseInt(document.getElementById('inputPrerollCount').value, 10) || 1;
-                config.MaxDurationSeconds = parseInt(document.getElementById('inputMaxDuration').value, 10) || 0;
-                config.EnableForTvShows   = document.getElementById('chkEnableTvShows').checked;
-                config.EnableForMovies    = document.getElementById('chkEnableMovies').checked;
+            apiGet('/Plugins/' + pluginId + '/Configuration')
+                .then(function (config) {
+                    config.PrerollLibraryId   = document.getElementById('selectPrerollLibrary').value;
+                    config.PrerollCount       = parseInt(document.getElementById('inputPrerollCount').value, 10) || 1;
+                    config.MaxDurationSeconds = parseInt(document.getElementById('inputMaxDuration').value, 10) || 0;
+                    config.EnableForTvShows   = document.getElementById('chkEnableTvShows').checked;
+                    config.EnableForMovies    = document.getElementById('chkEnableMovies').checked;
 
-                ApiClient.updatePluginConfiguration(pluginId, config).then(function () {
-                    Dashboard.processPluginConfigurationUpdateResult();
+                    return apiPost('/Plugins/' + pluginId + '/Configuration', config);
+                })
+                .then(function () {
+                    if (window.Dashboard && Dashboard.processPluginConfigurationUpdateResult) {
+                        Dashboard.processPluginConfigurationUpdateResult();
+                    } else {
+                        showDebug('Settings saved!');
+                    }
+                })
+                .catch(function (err) {
+                    showDebug('Save failed: ' + err.message);
                 });
-            });
         }
 
-        // ── Wire up events ───────────────────────────────────────────
+        // ── Initialize ───────────────────────────────────────────────
+        // Try multiple ways to trigger loading
         document.getElementById('prerollConfigPage')
-            .addEventListener('pageshow', function () { loadConfig(this); });
+            .addEventListener('pageshow', function () { loadConfig(); });
+
+        // Fallback: load after a delay if pageshow never fires
+        setTimeout(function () {
+            var select = document.getElementById('selectPrerollLibrary');
+            if (select && select.options.length <= 1) {
+                var text = select.options[0].textContent;
+                if (text.indexOf('Loading') >= 0) {
+                    loadConfig();
+                }
+            }
+        }, 2000);
 
         document.getElementById('prerollConfigForm')
             .addEventListener('submit', function (e) {
