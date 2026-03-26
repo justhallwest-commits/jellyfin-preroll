@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Preroll &amp; Intros</title>
+    <title>Pre-Roll Videos</title>
 </head>
 <body>
     <div id="prerollConfigPage" data-role="page" class="page type-interior pluginConfigurationPage"
@@ -12,7 +12,7 @@
 
                 <form id="prerollConfigForm">
                     <div class="sectionTitleContainer flex align-items-center">
-                        <h2 class="sectionTitle">Preroll &amp; Intros Settings</h2>
+                        <h2 class="sectionTitle">Pre-Roll Videos Settings</h2>
                     </div>
 
                     <p class="description">
@@ -93,10 +93,12 @@
                 select.innerHTML = '<option value="">— None (disabled) —</option>';
 
                 folders.forEach(function (folder) {
+                    // 10.11 uses Id, older versions use ItemId
+                    var folderId = folder.Id || folder.ItemId || '';
                     var option = document.createElement('option');
-                    option.value = folder.ItemId;
+                    option.value = folderId;
                     option.textContent = folder.Name;
-                    if (folder.ItemId === selectedId) {
+                    if (folderId === selectedId) {
                         option.selected = true;
                     }
                     select.appendChild(option);
