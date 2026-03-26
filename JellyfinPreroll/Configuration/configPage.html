@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Preroll &amp; Intros</title>
+    <title>Pre-Roll Videos</title>
 </head>
 <body>
     <div id="prerollConfigPage" data-role="page" class="page type-interior pluginConfigurationPage"
@@ -12,8 +12,10 @@
 
                 <form id="prerollConfigForm">
                     <div class="sectionTitleContainer flex align-items-center">
-                        <h2 class="sectionTitle">Preroll &amp; Intros Settings</h2>
+                        <h2 class="sectionTitle">Pre-Roll Videos Settings</h2>
                     </div>
+
+                    <div id="debugMsg" style="color: orange; margin-bottom: 1em; display: none;"></div>
 
                     <p class="description">
                         Choose a library that contains your preroll videos (studio logos, bumpers, intros, etc.).
@@ -24,11 +26,10 @@
                     <div class="selectContainer">
                         <label class="selectLabel" for="selectPrerollLibrary">Preroll Library</label>
                         <select is="emby-select" id="selectPrerollLibrary" class="emby-select-withcolor">
-                            <option value="">— None (disabled) —</option>
+                            <option value="">— Loading libraries... —</option>
                         </select>
                         <div class="fieldDescription">
                             Select the library that holds your preroll/intro videos.
-                            Create a dedicated library (type "Movies" or "Mixed Content") for best results.
                         </div>
                     </div>
 
@@ -83,20 +84,61 @@
     <script type="text/javascript">
         'use strict';
 
-        var pluginId = 'f4c1d2a3-8b5e-4f6d-9a7c-3e2b1d0f8a9c';
+        var pluginId = 'a4b2c3d4-e5f6-7890-abcd-ef1234567891';
 
-        // ── Load virtual folders (libraries) into the dropdown ───────
+        function showDebug(msg) {
+            var el = document.getElementById('debugMsg');
+            el.style.display = 'block';
+            el.textContent = msg;
+        }
+
+        // ── Fetch libraries using direct API call as fallback ────────
+        function fetchLibraries() {
+            // Try to get the server address and auth token
+            var apiClient = window.ApiClient;
+            if (!apiClient) {
+                showDebug('Error: ApiClient not available. Try refreshing the page.');
+                return Promise.resolve([]);
+            }
+
+            var serverUrl = apiClient.serverAddress();
+            var token = apiClient.accessToken();
+
+            // Use direct fetch to /Library/VirtualFolders
+            return fetch(serverUrl + '/Library/VirtualFolders', {
+                headers: {
+                    'Authorization': 'MediaBrowser Token="' + token + '"'
+                }
+            })
+            .then(function (response) {
+                if (!response.ok) {
+                    throw new Error('HTTP ' + response.status);
+                }
+                return response.json();
+            })
+            .catch(function (err) {
+                showDebug('Error loading libraries: ' + err.message);
+                return [];
+            });
+        }
+
+        // ── Populate dropdown ────────────────────────────────────────
         function populateLibraries(selectedId) {
-            ApiClient.getVirtualFolders().then(function (folders) {
+            fetchLibraries().then(function (folders) {
                 var select = document.getElementById('selectPrerollLibrary');
-                // Keep the "None" option
                 select.innerHTML = '<option value="">— None (disabled) —</option>';
 
+                if (!folders || folders.length === 0) {
+                    showDebug('No libraries found. Make sure you have at least one library set up.');
+                    return;
+                }
+
                 folders.forEach(function (folder) {
+                    var folderId = folder.ItemId || folder.Id || folder.LibraryId || '';
                     var option = document.createElement('option');
-                    option.value = folder.ItemId;
-                    option.textContent = folder.Name;
-                    if (folder.ItemId === selectedId) {
+                    option.value = folderId;
+                    option.textContent = folder.Name + ' (' + folderId.substring(0, 8) + '...)';
+                    if (folderId === selectedId) {
                         option.selected = true;
                     }
                     select.appendChild(option);
@@ -105,14 +147,24 @@
         }
 
         // ── Load saved configuration ─────────────────────────────────
-        function loadConfig(page) {
-            ApiClient.getPluginConfiguration(pluginId).then(function (config) {
-                populateLibraries(config.PrerollLibraryId || '');
+        function loadConfig() {
+            var apiClient = window.ApiClient;
+            if (!apiClient) {
+                showDebug('Waiting for ApiClient...');
+                setTimeout(loadConfig, 500);
+                return;
+            }
 
+            apiClient.getPluginConfiguration(pluginId).then(function (config) {
+                populateLibraries(config.PrerollLibraryId || '');
                 document.getElementById('inputPrerollCount').value = config.PrerollCount || 1;
                 document.getElementById('inputMaxDuration').value  = config.MaxDurationSeconds || 0;
                 document.getElementById('chkEnableTvShows').checked = config.EnableForTvShows !== false;
                 document.getElementById('chkEnableMovies').checked  = config.EnableForMovies !== false;
+            }).catch(function (err) {
+                showDebug('Error loading plugin config: ' + err.message);
+                // Still try to load libraries even if plugin config fails
+                populateLibraries('');
             });
         }
 
@@ -131,9 +183,17 @@
             });
         }
 
-        // ── Wire up events ───────────────────────────────────────────
+        // ── Wire up events — try multiple methods ────────────────────
         document.getElementById('prerollConfigPage')
-            .addEventListener('pageshow', function () { loadConfig(this); });
+            .addEventListener('pageshow', function () { loadConfig(); });
+
+        // Fallback: if pageshow never fires, load after a short delay
+        setTimeout(function () {
+            var select = document.getElementById('selectPrerollLibrary');
+            if (select && select.options.length <= 1 && select.options[0].textContent.indexOf('Loading') >= 0) {
+                loadConfig();
+            }
+        }, 1500);
 
         document.getElementById('prerollConfigForm')
             .addEventListener('submit', function (e) {
