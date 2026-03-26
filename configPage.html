@@ -80,7 +80,7 @@
     <script type="text/javascript">
         'use strict';
 
-        var pluginId = 'a4b2c3d4-e5f6-7890-abcd-ef1234567891';
+        var PLUGIN_ID = 'a4b2c3d4-e5f6-7890-abcd-ef1234567891';
 
         function showDebug(msg) {
             var el = document.getElementById('debugMsg');
@@ -88,176 +88,167 @@
             el.innerHTML += msg + '<br>';
         }
 
-        // ── Get auth header from any available source ────────────────
-        function getAuthHeaders() {
-            var headers = { 'Content-Type': 'application/json' };
-
-            // Try ApiClient first
-            if (window.ApiClient && window.ApiClient.accessToken && window.ApiClient.accessToken()) {
-                headers['Authorization'] = 'MediaBrowser Token="' + window.ApiClient.accessToken() + '"';
-                return headers;
+        // ── Find a working way to call the API ───────────────────────
+        function getApiInfo() {
+            // Method 1: window.ApiClient
+            if (window.ApiClient) {
+                try {
+                    var url = window.ApiClient.serverAddress();
+                    var token = window.ApiClient.accessToken();
+                    if (url && token) return { url: url, token: token };
+                } catch(e) {}
             }
 
-            // Try extracting from credentials store
+            // Method 2: parent.ApiClient (if in iframe)
             try {
-                var creds = JSON.parse(localStorage.getItem('jellyfin_credentials') || '{}');
-                if (creds.Servers && creds.Servers.length > 0) {
-                    var token = creds.Servers[0].AccessToken;
-                    if (token) {
-                        headers['Authorization'] = 'MediaBrowser Token="' + token + '"';
-                        return headers;
-                    }
+                if (window.parent && window.parent.ApiClient) {
+                    var url = window.parent.ApiClient.serverAddress();
+                    var token = window.parent.ApiClient.accessToken();
+                    if (url && token) return { url: url, token: token };
                 }
-            } catch (e) {}
+            } catch(e) {}
 
-            // Try other common storage keys
+            // Method 3: top.ApiClient
             try {
-                var keys = Object.keys(localStorage);
-                for (var i = 0; i < keys.length; i++) {
-                    var key = keys[i];
-                    if (key.indexOf('AccessToken') >= 0 || key.indexOf('accessToken') >= 0) {
-                        var val = localStorage.getItem(key);
-                        if (val && val.length > 10 && val.length < 200) {
-                            headers['Authorization'] = 'MediaBrowser Token="' + val + '"';
-                            return headers;
-                        }
-                    }
-                    // Jellyfin 10.11 stores credentials differently
-                    if (key.indexOf('credentials') >= 0 || key.indexOf('server') >= 0) {
-                        try {
-                            var parsed = JSON.parse(localStorage.getItem(key));
-                            var token = parsed.AccessToken || (parsed.Servers && parsed.Servers[0] && parsed.Servers[0].AccessToken);
-                            if (token) {
-                                headers['Authorization'] = 'MediaBrowser Token="' + token + '"';
-                                return headers;
-                            }
-                        } catch (e2) {}
-                    }
+                if (window.top && window.top.ApiClient) {
+                    var url = window.top.ApiClient.serverAddress();
+                    var token = window.top.ApiClient.accessToken();
+                    if (url && token) return { url: url, token: token };
                 }
-            } catch (e) {}
+            } catch(e) {}
 
-            return headers;
+            // Method 4: use current origin with no token (session cookie auth)
+            return { url: '', token: null };
         }
 
-        // ── Get base URL ─────────────────────────────────────────────
-        function getBaseUrl() {
-            if (window.ApiClient && window.ApiClient.serverAddress) {
-                try { return window.ApiClient.serverAddress(); } catch(e) {}
+        function apiFetch(path) {
+            var info = getApiInfo();
+            var url = (info.url || '') + path;
+            var headers = {};
+            if (info.token) {
+                headers['Authorization'] = 'MediaBrowser Token="' + info.token + '"';
             }
-            // Fall back to current page origin
-            return window.location.origin;
-        }
-
-        // ── API helper ───────────────────────────────────────────────
-        function apiGet(path) {
-            return fetch(getBaseUrl() + path, { headers: getAuthHeaders() })
-                .then(function (r) {
-                    if (!r.ok) throw new Error('HTTP ' + r.status + ' on ' + path);
+            return fetch(url, { headers: headers, credentials: 'same-origin' })
+                .then(function(r) {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
                     return r.json();
                 });
         }
 
         function apiPost(path, body) {
-            var h = getAuthHeaders();
-            h['Content-Type'] = 'application/json';
-            return fetch(getBaseUrl() + path, {
+            var info = getApiInfo();
+            var url = (info.url || '') + path;
+            var headers = { 'Content-Type': 'application/json' };
+            if (info.token) {
+                headers['Authorization'] = 'MediaBrowser Token="' + info.token + '"';
+            }
+            return fetch(url, {
                 method: 'POST',
-                headers: h,
+                headers: headers,
+                credentials: 'same-origin',
                 body: JSON.stringify(body)
-            }).then(function (r) {
-                if (!r.ok) throw new Error('HTTP ' + r.status + ' on ' + path);
+            }).then(function(r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
                 return r;
             });
         }
 
-        // ── Populate dropdown ────────────────────────────────────────
+        // ── Populate the library dropdown ─────────────────────────────
         function populateLibraries(selectedId) {
-            apiGet('/Library/VirtualFolders')
-                .then(function (folders) {
+            apiFetch('/Library/VirtualFolders')
+                .then(function(folders) {
                     var select = document.getElementById('selectPrerollLibrary');
                     select.innerHTML = '<option value="">— None (disabled) —</option>';
 
-                    if (!folders || folders.length === 0) {
-                        showDebug('API returned 0 libraries.');
+                    if (!folders || !folders.length) {
+                        showDebug('API returned 0 libraries. Response: ' + JSON.stringify(folders));
                         return;
                     }
 
-                    folders.forEach(function (folder) {
-                        var folderId = folder.ItemId || folder.Id || folder.LibraryId || '';
-                        var option = document.createElement('option');
-                        option.value = folderId;
-                        option.textContent = folder.Name;
-                        if (folderId === selectedId) {
-                            option.selected = true;
-                        }
-                        select.appendChild(option);
-                    });
+                    for (var i = 0; i < folders.length; i++) {
+                        var f = folders[i];
+                        var id = f.ItemId || f.Id || f.LibraryId || '';
+                        var opt = document.createElement('option');
+                        opt.value = id;
+                        opt.textContent = f.Name;
+                        if (id === selectedId) opt.selected = true;
+                        select.appendChild(opt);
+                    }
                 })
-                .catch(function (err) {
-                    showDebug('Failed to load libraries: ' + err.message);
-                    var select = document.getElementById('selectPrerollLibrary');
-                    select.innerHTML = '<option value="">— Error loading libraries —</option>';
+                .catch(function(err) {
+                    showDebug('Library fetch failed: ' + err.message);
+                    document.getElementById('selectPrerollLibrary').innerHTML =
+                        '<option value="">— Error: ' + err.message + ' —</option>';
                 });
         }
 
-        // ── Load config ──────────────────────────────────────────────
+        // ── Load plugin configuration ─────────────────────────────────
         function loadConfig() {
-            apiGet('/Plugins/' + pluginId + '/Configuration')
-                .then(function (config) {
+            apiFetch('/Plugins/' + PLUGIN_ID + '/Configuration')
+                .then(function(config) {
                     populateLibraries(config.PrerollLibraryId || '');
                     document.getElementById('inputPrerollCount').value = config.PrerollCount || 1;
-                    document.getElementById('inputMaxDuration').value  = config.MaxDurationSeconds || 0;
+                    document.getElementById('inputMaxDuration').value = config.MaxDurationSeconds || 0;
                     document.getElementById('chkEnableTvShows').checked = config.EnableForTvShows !== false;
-                    document.getElementById('chkEnableMovies').checked  = config.EnableForMovies !== false;
+                    document.getElementById('chkEnableMovies').checked = config.EnableForMovies !== false;
                 })
-                .catch(function (err) {
-                    showDebug('Config load error: ' + err.message + ' — loading libraries anyway...');
+                .catch(function(err) {
+                    showDebug('Config error: ' + err.message + ' — trying libraries anyway');
                     populateLibraries('');
                 });
         }
 
-        // ── Save config ──────────────────────────────────────────────
+        // ── Save plugin configuration ─────────────────────────────────
         function saveConfig() {
-            apiGet('/Plugins/' + pluginId + '/Configuration')
-                .then(function (config) {
-                    config.PrerollLibraryId   = document.getElementById('selectPrerollLibrary').value;
-                    config.PrerollCount       = parseInt(document.getElementById('inputPrerollCount').value, 10) || 1;
+            apiFetch('/Plugins/' + PLUGIN_ID + '/Configuration')
+                .then(function(config) {
+                    config.PrerollLibraryId = document.getElementById('selectPrerollLibrary').value;
+                    config.PrerollCount = parseInt(document.getElementById('inputPrerollCount').value, 10) || 1;
                     config.MaxDurationSeconds = parseInt(document.getElementById('inputMaxDuration').value, 10) || 0;
-                    config.EnableForTvShows   = document.getElementById('chkEnableTvShows').checked;
-                    config.EnableForMovies    = document.getElementById('chkEnableMovies').checked;
-
-                    return apiPost('/Plugins/' + pluginId + '/Configuration', config);
+                    config.EnableForTvShows = document.getElementById('chkEnableTvShows').checked;
+                    config.EnableForMovies = document.getElementById('chkEnableMovies').checked;
+                    return apiPost('/Plugins/' + PLUGIN_ID + '/Configuration', config);
                 })
-                .then(function () {
-                    if (window.Dashboard && Dashboard.processPluginConfigurationUpdateResult) {
-                        Dashboard.processPluginConfigurationUpdateResult();
-                    } else {
-                        showDebug('Settings saved!');
+                .then(function() {
+                    try { Dashboard.processPluginConfigurationUpdateResult(); } catch(e) {
+                        showDebug('Settings saved successfully!');
                     }
                 })
-                .catch(function (err) {
+                .catch(function(err) {
                     showDebug('Save failed: ' + err.message);
                 });
         }
 
-        // ── Initialize ───────────────────────────────────────────────
-        // Try multiple ways to trigger loading
-        document.getElementById('prerollConfigPage')
-            .addEventListener('pageshow', function () { loadConfig(); });
-
-        // Fallback: load after a delay if pageshow never fires
-        setTimeout(function () {
-            var select = document.getElementById('selectPrerollLibrary');
-            if (select && select.options.length <= 1) {
-                var text = select.options[0].textContent;
-                if (text.indexOf('Loading') >= 0) {
+        // ── Initialize: poll until we can reach the API ───────────────
+        var attempts = 0;
+        function tryLoad() {
+            attempts++;
+            apiFetch('/Library/VirtualFolders')
+                .then(function() {
+                    // API is reachable — now load everything
                     loadConfig();
-                }
-            }
-        }, 2000);
+                })
+                .catch(function(err) {
+                    if (attempts < 10) {
+                        setTimeout(tryLoad, 1000);
+                    } else {
+                        showDebug('Cannot reach Jellyfin API after 10 attempts: ' + err.message);
+                        document.getElementById('selectPrerollLibrary').innerHTML =
+                            '<option value="">— Cannot connect to API —</option>';
+                    }
+                });
+        }
 
+        // Start trying immediately
+        tryLoad();
+
+        // Also listen for legacy pageshow
+        document.getElementById('prerollConfigPage')
+            .addEventListener('pageshow', function() { loadConfig(); });
+
+        // Form submit
         document.getElementById('prerollConfigForm')
-            .addEventListener('submit', function (e) {
+            .addEventListener('submit', function(e) {
                 e.preventDefault();
                 saveConfig();
                 return false;
