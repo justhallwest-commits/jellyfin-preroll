@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
- 
+
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <RootNamespace>JellyfinPreroll</RootNamespace>
@@ -11,7 +11,7 @@
     <Nullable>enable</Nullable>
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>
- 
+
   <ItemGroup>
     <PackageReference Include="Jellyfin.Controller" Version="10.11.6">
       <ExcludeAssets>runtime</ExcludeAssets>
@@ -26,7 +26,9 @@
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
   </ItemGroup>
- 
+
   <ItemGroup>
     <EmbeddedResource Include="Configuration/configPage.html" />
   </ItemGroup>
+
+</Project>
